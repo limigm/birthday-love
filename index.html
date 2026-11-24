@@ -396,56 +396,72 @@ body{font-family:var(--serif);color:var(--ink);background:#fdeaec;-webkit-font-s
     if(img.complete) done(); else img.addEventListener('load', done);
   });
 
-  /* 背景音乐：微信自动播放 */
+  /* 背景音乐：状态只认音频的真实事件，不认 play() 调用结果 */
   var music=document.getElementById('music'), musicBtn=document.getElementById('musicBtn');
-  var musicOn=false, userToggled=false, gestureBound=true;
+  var userToggled=false, gestureBound=true;
 
-  /* 只有真正播放成功才认，失败不更新状态、不解除手势监听 */
-  function markPlaying(){
-    musicOn=true;
-    musicBtn.classList.add('playing');
-    musicBtn.classList.remove('tip');
-    if(gestureBound){
-      document.removeEventListener('touchstart',tryPlay,true);
-      document.removeEventListener('click',tryPlay,true);
-      document.removeEventListener('touchend',tryPlay,true);
-      gestureBound=false;
-    }
+  function reallyPlaying(){
+    return !music.paused && music.currentTime > 0;
+  }
+  function refreshBtn(){
+    var on=reallyPlaying();
+    musicBtn.classList.toggle('playing',on);
+    if(on) musicBtn.classList.remove('tip');
   }
   function doPlay(){
+    if(userToggled) return;
     var p=music.play();
-    if(p && p.then){ p.then(markPlaying).catch(function(){}); }
-    else if(musicOn || !music.paused){ markPlaying(); }
+    if(p && p.catch) p.catch(function(){});  /* 失败就等着,不假装成功 */
   }
   function tryPlay(){
-    if(userToggled || musicOn) return;
+    if(userToggled || reallyPlaying()) return;
     doPlay();
   }
-  function setMusic(on){
-    if(on){ doPlay(); }
-    else {
-      music.pause();
-      musicOn=false;
-      musicBtn.classList.remove('playing','tip');
-    }
-  }
-  musicBtn.addEventListener('click',function(e){ e.stopPropagation(); userToggled=true; setMusic(!musicOn); });
+  /* 按钮:完全按真实状态切换——正在响就暂停,没响就播放 */
+  musicBtn.addEventListener('click',function(e){
+    e.stopPropagation();
+    userToggled=true;
+    if(reallyPlaying()){ music.pause(); }
+    else { var p=music.play(); if(p&&p.catch) p.catch(function(){}); }
+    setTimeout(refreshBtn,50);
+  });
 
-  /* 微信内置浏览器：WeixinJSBridge 就绪后用官方方式触发播放 */
+  /* 微信环境就绪后尝试 */
   function wxReady(){
     if(window.WeixinJSBridge && WeixinJSBridge.invoke){
-      WeixinJSBridge.invoke('getNetworkType',{},function(){ if(!userToggled) doPlay(); });
+      WeixinJSBridge.invoke('getNetworkType',{},function(){ doPlay(); });
     }
   }
   if(window.WeixinJSBridge) wxReady();
   else document.addEventListener('WeixinJSBridgeReady',wxReady,false);
 
-  /* 保底：任何一次用户手势都再试，失败不卸监听，直到真正播起来 */
+  /* 每次手势都再试;真播起来后 refreshing 会自动摘掉监听 */
   document.addEventListener('touchstart',tryPlay,true);
   document.addEventListener('touchend',tryPlay,true);
   document.addEventListener('click',tryPlay,true);
-  music.addEventListener('playing',markPlaying);
-  music.addEventListener('pause',function(){ if(userToggled){ musicOn=false; musicBtn.classList.remove('playing'); } });
+
+  /* 只有音频真的开始播放,才认、才停掉手势监听 */
+  music.addEventListener('playing',function(){
+    musicBtn.classList.add('playing');
+    musicBtn.classList.remove('tip');
+    if(gestureBound){
+      document.removeEventListener('touchstart',tryPlay,true);
+      document.removeEventListener('touchend',tryPlay,true);
+      document.removeEventListener('click',tryPlay,true);
+      gestureBound=false;
+    }
+  });
+  music.addEventListener('pause',refreshBtn);
+  music.addEventListener('timeupdate',function(){ if(music.currentTime>0) musicBtn.classList.remove('tip'); });
+
+  /* 页面空闲后在后台预缓冲:首屏不等它,但用户触碰时已经加载好,一点就响 */
+  function preloadAudio(){
+    if(music.readyState>=2) return;
+    var src=music.getAttribute('src');
+    music.setAttribute('src',src);  /* 触发加载,不播放 */
+    music.load();
+  }
+  if(window.addEventListener) window.addEventListener('load',function(){ setTimeout(preloadAudio,300); },false);
 
   /* 翻页：进度、页码、圆点、入场动画 */
   var deck=document.getElementById('deck');
