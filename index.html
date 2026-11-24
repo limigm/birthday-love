@@ -189,7 +189,7 @@ body{font-family:var(--serif);color:var(--ink);background:#fdeaec;-webkit-font-s
 </head>
 <body>
 
-<audio id="music" src="music.mp3" loop preload="auto" playsinline webkit-playsinline></audio>
+<audio id="music" src="music.mp3" loop autoplay preload="auto" playsinline webkit-playsinline></audio>
 
 <div class="progress" id="progress"></div>
 <div class="counter" id="counter">01 / 16</div>
@@ -396,26 +396,55 @@ body{font-family:var(--serif);color:var(--ink);background:#fdeaec;-webkit-font-s
     if(img.complete) done(); else img.addEventListener('load', done);
   });
 
-  /* 背景音乐 */
+  /* 背景音乐：微信自动播放 */
   var music=document.getElementById('music'), musicBtn=document.getElementById('musicBtn');
-  var musicOn=false, userToggled=false;
+  var musicOn=false, userToggled=false, gestureBound=true;
+
+  /* 只有真正播放成功才认，失败不更新状态、不解除手势监听 */
+  function markPlaying(){
+    musicOn=true;
+    musicBtn.classList.add('playing');
+    musicBtn.classList.remove('tip');
+    if(gestureBound){
+      document.removeEventListener('touchstart',tryPlay,true);
+      document.removeEventListener('click',tryPlay,true);
+      document.removeEventListener('touchend',tryPlay,true);
+      gestureBound=false;
+    }
+  }
+  function doPlay(){
+    var p=music.play();
+    if(p && p.then){ p.then(markPlaying).catch(function(){}); }
+    else if(musicOn || !music.paused){ markPlaying(); }
+  }
+  function tryPlay(){
+    if(userToggled || musicOn) return;
+    doPlay();
+  }
   function setMusic(on){
-    if(on){ var p=music.play(); if(p&&p.catch) p.catch(function(){}); } else { music.pause(); }
-    musicOn=on; musicBtn.classList.toggle('playing',on); musicBtn.classList.remove('tip');
+    if(on){ doPlay(); }
+    else {
+      music.pause();
+      musicOn=false;
+      musicBtn.classList.remove('playing','tip');
+    }
   }
   musicBtn.addEventListener('click',function(e){ e.stopPropagation(); userToggled=true; setMusic(!musicOn); });
-  function wxAutoPlay(){ if(!musicOn&&!userToggled) setMusic(true); }
-  document.addEventListener('WeixinJSBridgeReady',wxAutoPlay,false);
-  if(window.WeixinJSBridge) wxAutoPlay();
-  function firstGesture(){
-    if(userToggled) return;
-    if(!musicOn) setMusic(true);
-    document.removeEventListener('touchstart',firstGesture,true);
-    document.removeEventListener('click',firstGesture,true);
+
+  /* 微信内置浏览器：WeixinJSBridge 就绪后用官方方式触发播放 */
+  function wxReady(){
+    if(window.WeixinJSBridge && WeixinJSBridge.invoke){
+      WeixinJSBridge.invoke('getNetworkType',{},function(){ if(!userToggled) doPlay(); });
+    }
   }
-  document.addEventListener('touchstart',firstGesture,true);
-  document.addEventListener('click',firstGesture,true);
-  music.addEventListener('playing',function(){ musicOn=true; musicBtn.classList.add('playing'); musicBtn.classList.remove('tip'); });
+  if(window.WeixinJSBridge) wxReady();
+  else document.addEventListener('WeixinJSBridgeReady',wxReady,false);
+
+  /* 保底：任何一次用户手势都再试，失败不卸监听，直到真正播起来 */
+  document.addEventListener('touchstart',tryPlay,true);
+  document.addEventListener('touchend',tryPlay,true);
+  document.addEventListener('click',tryPlay,true);
+  music.addEventListener('playing',markPlaying);
   music.addEventListener('pause',function(){ if(userToggled){ musicOn=false; musicBtn.classList.remove('playing'); } });
 
   /* 翻页：进度、页码、圆点、入场动画 */
