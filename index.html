@@ -124,7 +124,8 @@ body{font-family:var(--serif);color:var(--ink);background:#fdeaec;-webkit-font-s
 
 /* 照片槽位 */
 .photo{position:relative;overflow:hidden;background:#f3e2e2;display:flex;align-items:center;justify-content:center}
-.photo img{width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .8s}
+.photo picture{display:block;width:100%;height:100%}
+.photo img{width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .6s}
 .photo img.loaded{opacity:1}
 .card{background:var(--card);padding:6px 6px 18px;box-shadow:0 10px 24px rgba(150,100,120,.2)}
 
@@ -311,8 +312,13 @@ body{font-family:var(--serif);color:var(--ink);background:#fdeaec;-webkit-font-s
     14:{yr:'yrDrop',pic:'eCorner'}
   };
   function bg(){ return '<div class="bg"><span class="glow g1"></span><span class="glow g2"></span><span class="glow g3"></span><span class="petals"></span></div>'; }
-  function photoSlot(file, cls, ent){
-    return '<div class="card '+(cls||'')+' anim pop" style="--pic:'+(ent||'eUp')+'"><div class="photo"><img src="photos/'+file+'" alt="" loading="lazy"></div></div>';
+  /* picture 让浏览器自己选 WebP，不支持的自动退回 JPG；src 先留空，由脚本按节奏填 */
+  function picTag(file, pg){
+    var base=file.replace(/\.(jpg|jpeg|png)$/i,'');
+    return '<picture><source data-f="photos/'+base+'.webp" type="image/webp"><img data-f="photos/'+base+'.jpg" data-pg="'+pg+'" alt=""></picture>';
+  }
+  function photoSlot(file, cls, ent, pg){
+    return '<div class="card '+(cls||'')+' anim pop" style="--pic:'+(ent||'eUp')+'"><div class="photo">'+picTag(file,pg)+'</div></div>';
   }
   function yearPage(item, pg){
     var n = item.photos.length;
@@ -320,12 +326,12 @@ body{font-family:var(--serif);color:var(--ink);background:#fdeaec;-webkit-font-s
     var E = ENTER[pg];
     var imgs = '';
     if(n===1){
-      imgs = '<div class="solo anim pop" style="--pic:'+E.pic+'"><div class="photo" style="height:100%"><img src="photos/'+item.photos[0]+'" alt="" loading="lazy"></div></div>';
+      imgs = '<div class="solo anim pop" style="--pic:'+E.pic+'"><div class="photo" style="height:100%">'+picTag(item.photos[0],pg)+'</div></div>';
     } else if(n===2){
-      imgs = '<div class="duo">'+photoSlot(item.photos[0],'a',E.pic)+photoSlot(item.photos[1],'b','eRise')+'</div>';
+      imgs = '<div class="duo">'+photoSlot(item.photos[0],'a',E.pic,pg)+photoSlot(item.photos[1],'b','eRise',pg)+'</div>';
     } else {
-      imgs = '<div class="grid3">'+photoSlot(item.photos[0],'big',E.pic)
-             + photoSlot(item.photos[1],'','eCard')+photoSlot(item.photos[2],'','eFlip')+'</div>';
+      imgs = '<div class="grid3">'+photoSlot(item.photos[0],'big',E.pic,pg)
+             + photoSlot(item.photos[1],'','eCard',pg)+photoSlot(item.photos[2],'','eFlip',pg)+'</div>';
     }
     return '<section class="page yearpg pg'+pg+' '+layout+'">'+bg()
       + '<div class="love '+item.lp+' anim" style="--d:.85s">'+item.love+'</div>'
@@ -390,11 +396,31 @@ body{font-family:var(--serif);color:var(--ink);background:#fdeaec;-webkit-font-s
     }
   });
 
-  /* 图片加载完成淡入 */
-  document.querySelectorAll('.photo img').forEach(function(img){
-    function done(){ img.classList.add('loaded'); }
-    if(img.complete) done(); else img.addEventListener('load', done);
-  });
+  /* 图片调度：先出首屏几张，其余后台慢慢补；翻到哪页就保证那页和下一页已经下载 */
+  var allImgs=Array.prototype.slice.call(document.querySelectorAll('.photo img'));
+  function loadImg(img){
+    if(img.dataset.l) return;
+    img.dataset.l='1';
+    img.addEventListener('load',function(){ img.classList.add('loaded'); });
+    var pic=img.parentNode, source=pic&&pic.querySelector('source');
+    if(source && source.dataset.f) source.srcset=source.dataset.f;
+    img.src=img.dataset.f;
+    if(img.complete) img.classList.add('loaded');
+  }
+  function loadThrough(pg){
+    for(var i=0;i<allImgs.length;i++){
+      if(+allImgs[i].dataset.pg<=pg) loadImg(allImgs[i]); else break;
+    }
+  }
+  loadThrough(3);  /* 封面之后前两张年份页立刻加载 */
+  if(window.addEventListener) window.addEventListener('load',function(){
+    var i=0;
+    (function step(){
+      var end=Date.now()+45;
+      while(i<allImgs.length && Date.now()<end){ loadImg(allImgs[i++]); }
+      if(i<allImgs.length) setTimeout(step,130);
+    })();
+  },false);
 
   /* 背景音乐：状态只认音频的真实事件，不认 play() 调用结果 */
   var music=document.getElementById('music'), musicBtn=document.getElementById('musicBtn');
@@ -473,6 +499,7 @@ body{font-family:var(--serif);color:var(--ink);background:#fdeaec;-webkit-font-s
   function activate(idx){
     if(idx===current) return;
     current=idx;
+    loadThrough(idx+1);  /* 当前页和下一页的图提前准备好 */
     pages.forEach(function(p,i){ p.classList.toggle('in',i===idx); });
     dots.forEach(function(d,i){ d.classList.toggle('on',i===idx); });
     counter.textContent=String(idx+1).padStart(2,'0')+' / '+String(pages.length).padStart(2,'0');
